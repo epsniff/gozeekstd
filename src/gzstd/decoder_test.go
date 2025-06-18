@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io"
 	"testing"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 func createTestArchive(t *testing.T, frames [][]byte) *bytes.Buffer {
