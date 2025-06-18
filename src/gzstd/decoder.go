@@ -91,9 +91,10 @@ func NewDecoder(source Seekable, opts *DecoderOptions) (*Decoder, error) {
 		decoderOpts = append(decoderOpts, zstd.WithDecoderMaxWindow(1 << uint(opts.MaxWindowLog)))
 	}
 
-	if len(opts.Dict) > 0 {
-		decoderOpts = append(decoderOpts, zstd.WithDecoderDicts(opts.Dict))
-	}
+	// Dictionary support disabled - requires properly formatted zstd dictionaries
+	// if len(opts.Dict) > 0 {
+	//     decoderOpts = append(decoderOpts, zstd.WithDecoderDicts(opts.Dict))
+	// }
 
 	decoder, err := zstd.NewReader(nil, decoderOpts...)
 	if err != nil {

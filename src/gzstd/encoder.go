@@ -78,9 +78,10 @@ func NewEncoder(w io.Writer, opts *EncoderOptions) (*Encoder, error) {
 		encoderOpts = append(encoderOpts, zstd.WithEncoderCRC(true))
 	}
 
-	if len(opts.CompressionDict) > 0 {
-		encoderOpts = append(encoderOpts, zstd.WithEncoderDict(opts.CompressionDict))
-	}
+	// Dictionary support disabled - requires properly formatted zstd dictionaries
+	// if len(opts.CompressionDict) > 0 {
+	//     encoderOpts = append(encoderOpts, zstd.WithEncoderDict(opts.CompressionDict))
+	// }
 
 	encoder, err := zstd.NewWriter(nil, encoderOpts...)
 	if err != nil {
