@@ -7,7 +7,6 @@ import (
 	"gozeekstd/src/gzstd"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/klauspost/compress/zstd"
@@ -113,8 +112,9 @@ func parseOptions() *Options {
 	
 	// Extended options
 	flag.StringVar(&opts.FrameSize, "frame-size", defaultFrameSize, "seekable frame size")
-	flag.UintVar(&opts.StartFrame, "start-frame", 0, "start decompression at frame")
-	flag.UintVar(&opts.EndFrame, "end-frame", 0, "end decompression at frame")
+	var startFrame, endFrame uint
+	flag.UintVar(&startFrame, "start-frame", 0, "start decompression at frame")
+	flag.UintVar(&endFrame, "end-frame", 0, "end decompression at frame")
 	
 	flag.Parse()
 	
@@ -122,6 +122,10 @@ func parseOptions() *Options {
 	if opts.Level == 0 {
 		opts.Level = defaultCompressionLevel
 	}
+	
+	// Convert uint to uint32
+	opts.StartFrame = uint32(startFrame)
+	opts.EndFrame = uint32(endFrame)
 	
 	return opts
 }
@@ -269,7 +273,7 @@ func decompressFile(inputFile string, opts *Options) error {
 	}
 
 	// Decompress data
-	written, err := io.Copy(output, decoder)
+	_, err = io.Copy(output, decoder)
 	if err != nil {
 		return err
 	}
