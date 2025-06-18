@@ -143,8 +143,7 @@ func parseOptions() *Options {
 	flagSet.BoolVar(&opts.Decompress, "d", false, "decompress")
 	flagSet.BoolVar(&opts.Decompress, "decompress", false, "decompress")
 
-	// Compression level
-	flagSet.IntVar(&opts.Level, "c", defaultCompressionLevel, "compression level (1-9)")
+	// Compression level (removed -c short flag to avoid conflict)
 	flagSet.IntVar(&opts.Level, "compression", defaultCompressionLevel, "compression level (1-9)")
 	
 	// Keep/no-keep flags
@@ -203,14 +202,6 @@ func parseOptions() *Options {
 		}
 	}
 
-	// Handle compression level shortcuts
-	for i := 1; i <= 9; i++ {
-		if flagSet.Lookup(fmt.Sprintf("%d", i)).Value.String() == "true" {
-			opts.Level = i
-			break
-		}
-	}
-
 	// Convert uint to uint32
 	opts.StartFrame = uint32(startFrame)
 	opts.EndFrame = uint32(endFrame)
@@ -218,17 +209,24 @@ func parseOptions() *Options {
 	// Set keep behavior
 	opts.Keep = !opts.NoKeep
 
-	// Handle -c flag conflict (it can mean compression level or stdout)
-	// If -c is followed by a number, it's compression level, otherwise stdout
-	args := os.Args[1:]
-	for i, arg := range args {
-		if arg == "-c" && i+1 < len(args) {
-			// Check if next arg is a number
-			var level int
-			if _, err := fmt.Sscanf(args[i+1], "%d", &level); err == nil && level >= 1 && level <= 9 {
-				opts.Level = level
+	// Handle -c flag with optional argument
+	// If -c is followed by a number 1-9, it's compression level, otherwise stdout
+	args := flagSet.Args()
+	rawArgs := os.Args[1:]
+	for i, arg := range rawArgs {
+		if arg == "-c" && i+1 < len(rawArgs) {
+			// Check if next arg is a number 1-9
+			nextArg := rawArgs[i+1]
+			if len(nextArg) == 1 && nextArg[0] >= '1' && nextArg[0] <= '9' {
+				// It's a compression level
+				level, _ := fmt.Sscanf(nextArg, "%d", &opts.Level)
 				opts.Stdout = false
+				_ = level
 			}
+		} else if strings.HasPrefix(arg, "-c") && len(arg) == 3 && arg[2] >= '1' && arg[2] <= '9' {
+			// Handle -c1 through -c9 syntax
+			opts.Level = int(arg[2] - '0')
+			opts.Stdout = false
 		}
 	}
 
@@ -249,7 +247,8 @@ Basic Usage:
   %s -d file.txt.zst   Decompress file
 
 Compression Options:
-  -c, --compression=1 to 9  Compression level (1=fastest, 9=best compression, 6=default)
+  -1 to -9                 Compression level (1=fastest, 9=best compression, 6=default)
+  --compression=LEVEL      Set compression level (1-9)
   -nk, --no-keep           Don't keep the original files (The default is to keep files)
 
 Output Control:
