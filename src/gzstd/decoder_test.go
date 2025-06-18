@@ -156,8 +156,9 @@ func TestDecoder_FrameBoundaries(t *testing.T) {
 	
 	// Test with frame boundaries
 	opts := &DecoderOptions{
-		LowerFrame: 1,
-		UpperFrame: 2,
+		LowerFrame:   1,
+		UpperFrame:   2,
+		MaxWindowLog: 27, // Set a valid window size
 	}
 	
 	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), opts)
@@ -270,7 +271,8 @@ func TestDecoder_WithDictionary(t *testing.T) {
 	
 	// Decode with dictionary
 	decoder, err := NewDecoder(bytes.NewReader(buf.Bytes()), &DecoderOptions{
-		Dict: dict,
+		Dict:         dict,
+		MaxWindowLog: 27, // Set a valid window size
 	})
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)

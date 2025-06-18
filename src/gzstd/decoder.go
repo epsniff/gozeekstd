@@ -27,6 +27,8 @@ type DecoderOptions struct {
 func DefaultDecoderOptions() *DecoderOptions {
 	return &DecoderOptions{
 		MaxWindowLog: 27, // 128MB max window
+		LowerFrame:   0,
+		UpperFrame:   0,
 	}
 }
 
@@ -82,7 +84,11 @@ func NewDecoder(source Seekable, opts *DecoderOptions) (*Decoder, error) {
 
 	decoderOpts := []zstd.DOption{
 		zstd.WithDecoderConcurrency(1),
-		zstd.WithDecoderMaxWindow(1 << uint(opts.MaxWindowLog)),
+	}
+	
+	// Only set max window if it's large enough
+	if opts.MaxWindowLog >= 10 { // 2^10 = 1024 bytes minimum
+		decoderOpts = append(decoderOpts, zstd.WithDecoderMaxWindow(1 << uint(opts.MaxWindowLog)))
 	}
 
 	if len(opts.Dict) > 0 {
@@ -115,6 +121,11 @@ func NewDecoder(source Seekable, opts *DecoderOptions) (*Decoder, error) {
 			return nil, err
 		}
 		if _, err := source.Seek(int64(startOffset), io.SeekStart); err != nil {
+			return nil, err
+		}
+	} else {
+		// Ensure we're at the start
+		if _, err := source.Seek(0, io.SeekStart); err != nil {
 			return nil, err
 		}
 	}
