@@ -24,25 +24,26 @@ const (
 
 // Options holds command-line options
 type Options struct {
-	Decompress bool
-	List       bool
-	Stdout     bool
-	Force      bool
-	Keep       bool
-	NoKeep     bool
-	Quiet      bool
-	Verbose    bool
-	Test       bool
-	Level      int
-	FrameSize  string
-	StartFrame uint32
-	EndFrame   uint32
-	Recursive  bool
-	Suffix     string
-	NoName     bool
-	Name       bool
-	Help       bool
-	Version    bool
+	Decompress   bool
+	DecompressTo string // Output filename for decompression
+	List         bool
+	Stdout       bool
+	Force        bool
+	Keep         bool
+	NoKeep       bool
+	Quiet        bool
+	Verbose      bool
+	Test         bool
+	Level        int
+	FrameSize    string
+	StartFrame   uint32
+	EndFrame     uint32
+	Recursive    bool
+	Suffix       string
+	NoName       bool
+	Name         bool
+	Help         bool
+	Version      bool
 }
 
 func main() {
@@ -58,7 +59,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	files := flag.Args()
+	files := flagSet.Args()
 	if len(files) == 0 {
 		files = []string{"-"} // Default to stdin
 	}
@@ -142,6 +143,7 @@ func parseOptions() *Options {
 	// Decompress flags
 	flagSet.BoolVar(&opts.Decompress, "d", false, "decompress")
 	flagSet.BoolVar(&opts.Decompress, "decompress", false, "decompress")
+	flagSet.StringVar(&opts.DecompressTo, "do", "", "decompress to specified output file")
 
 	// Compression level (removed -c short flag to avoid conflict)
 	flagSet.IntVar(&opts.Level, "compression", defaultCompressionLevel, "compression level (1-9)")
@@ -207,6 +209,17 @@ func parseOptions() *Options {
 		}
 	}
 
+	// Handle -d=filename syntax
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "-d=") || strings.HasPrefix(arg, "--decompress=") {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) == 2 && parts[1] != "" {
+				opts.Decompress = true
+				opts.DecompressTo = parts[1]
+			}
+		}
+	}
+
 	// Handle compression level shortcuts
 	for i := 1; i <= 9; i++ {
 		if flagSet.Lookup(fmt.Sprintf("%d", i)).Value.String() == "true" {
@@ -257,6 +270,7 @@ Basic Usage:
   %s -nk file.txt      Compress file.txt (creates file.txt%s and removes original)
   %s file.txt          Compress file.txt (creates file.txt%s and keeps the original)
   %s -d file.txt.zst   Decompress file
+  %s -d file.txt.zst -do output.txt   Decompress to specific file
 
 Compression Options:
   -1 to -9                 Compression level (1=fastest, 9=best compression, 6=default)
