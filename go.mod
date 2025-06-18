@@ -1,5 +1,5 @@
-module gozeekstd
+module github.com/epsniff/gozeekstd
 
-go 1.21
+go 1.24.1
 
-require github.com/klauspost/compress v1.17.4
+require github.com/klauspost/compress v1.18.0
