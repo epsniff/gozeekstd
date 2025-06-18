@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"path/filepath"
 
 	"io"
 	"os"
@@ -14,10 +15,11 @@ import (
 )
 
 const (
-	defaultCompressionLevel = 3
+	defaultCompressionLevel = 6
 	defaultFrameSize        = "512K"
 	programName             = "gzstd"
 	fileExtension           = ".zst"
+	version                 = "1.0.0"
 )
 
 // Options holds command-line options
@@ -27,7 +29,7 @@ type Options struct {
 	Stdout     bool
 	Force      bool
 	Keep       bool
-	Remove     bool // New flag to explicitly remove original files
+	NoKeep     bool
 	Quiet      bool
 	Verbose    bool
 	Test       bool
@@ -35,32 +37,36 @@ type Options struct {
 	FrameSize  string
 	StartFrame uint32
 	EndFrame   uint32
+	Recursive  bool
+	Suffix     string
+	NoName     bool
+	Name       bool
+	Help       bool
+	Version    bool
 }
 
 func main() {
 	opts := parseOptions()
+
+	// Handle help and version
+	if opts.Help {
+		showHelp()
+		os.Exit(0)
+	}
+	if opts.Version {
+		fmt.Printf("%s version %s\n", programName, version)
+		os.Exit(0)
+	}
 
 	files := flag.Args()
 	if len(files) == 0 {
 		files = []string{"-"} // Default to stdin
 	}
 
-	// Execute the appropriate operation
+	// Process files
 	var exitCode int
 	for _, file := range files {
-		var err error
-		switch {
-		case opts.List:
-			err = listFile(file, opts)
-		case opts.Test:
-			err = testFile(file, opts)
-		case opts.Decompress:
-			err = decompressFile(file, opts)
-		default:
-			err = compressFile(file, opts)
-		}
-
-		if err != nil {
+		if err := processFile(file, opts); err != nil {
 			if !opts.Quiet {
 				fmt.Fprintf(os.Stderr, "%s: %s: %v\n", programName, file, err)
 			}
@@ -71,73 +77,218 @@ func main() {
 	os.Exit(exitCode)
 }
 
+func processFile(file string, opts *Options) error {
+	// Handle recursive directory processing
+	if opts.Recursive && file != "-" {
+		info, err := os.Stat(file)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return processDirectory(file, opts)
+		}
+	}
+
+	// Process single file
+	switch {
+	case opts.List:
+		return listFile(file, opts)
+	case opts.Test:
+		return testFile(file, opts)
+	case opts.Decompress:
+		return decompressFile(file, opts)
+	default:
+		return compressFile(file, opts)
+	}
+}
+
+func processDirectory(dir string, opts *Options) error {
+	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+		
+		// Process based on operation
+		if opts.Decompress {
+			// Only process files with compression suffix
+			if strings.HasSuffix(path, opts.Suffix) {
+				return processFile(path, opts)
+			}
+		} else {
+			// Skip already compressed files
+			if !strings.HasSuffix(path, opts.Suffix) {
+				return processFile(path, opts)
+			}
+		}
+		
+		return nil
+	})
+}
+
 func parseOptions() *Options {
-	opts := &Options{}
+	opts := &Options{
+		Suffix: fileExtension,
+	}
 
-	// Decompress flags (multiple aliases like gzip)
-	flag.BoolVar(&opts.Decompress, "d", false, "decompress")
-	flag.BoolVar(&opts.Decompress, "decompress", false, "decompress")
-	flag.BoolVar(&opts.Decompress, "uncompress", false, "decompress")
+	// Custom flag set to control parsing
+	flagSet := flag.NewFlagSet(programName, flag.ContinueOnError)
+	flagSet.SetOutput(io.Discard) // Suppress default error output
 
-	// List/test flags
-	flag.BoolVar(&opts.List, "l", false, "list compressed file contents")
-	flag.BoolVar(&opts.List, "list", false, "list compressed file contents")
-	flag.BoolVar(&opts.Test, "t", false, "test compressed file integrity")
-	flag.BoolVar(&opts.Test, "test", false, "test compressed file integrity")
+	// Decompress flags
+	flagSet.BoolVar(&opts.Decompress, "d", false, "decompress")
+	flagSet.BoolVar(&opts.Decompress, "decompress", false, "decompress")
 
-	// Output flags
-	flag.BoolVar(&opts.Stdout, "c", false, "write to stdout")
-	flag.BoolVar(&opts.Stdout, "stdout", false, "write to stdout")
-	flag.BoolVar(&opts.Keep, "k", false, "keep original files (deprecated, now default)")
-	flag.BoolVar(&opts.Keep, "keep", false, "keep original files (deprecated, now default)")
-	flag.BoolVar(&opts.Remove, "rm", false, "remove original files after successful compression")
-	flag.BoolVar(&opts.Remove, "remove", false, "remove original files after successful compression")
+	// Compression level
+	flagSet.IntVar(&opts.Level, "c", defaultCompressionLevel, "compression level (1-9)")
+	flagSet.IntVar(&opts.Level, "compression", defaultCompressionLevel, "compression level (1-9)")
+	
+	// Keep/no-keep flags
+	flagSet.BoolVar(&opts.NoKeep, "nk", false, "don't keep original files")
+	flagSet.BoolVar(&opts.NoKeep, "no-keep", false, "don't keep original files")
 
-	// Behavior flags
-	flag.BoolVar(&opts.Force, "f", false, "force overwrite")
-	flag.BoolVar(&opts.Force, "force", false, "force overwrite")
-	flag.BoolVar(&opts.Quiet, "q", false, "suppress all warnings")
-	flag.BoolVar(&opts.Quiet, "quiet", false, "suppress all warnings")
-	flag.BoolVar(&opts.Verbose, "v", false, "verbose mode")
-	flag.BoolVar(&opts.Verbose, "verbose", false, "verbose mode")
+	// Output control
+	flagSet.BoolVar(&opts.Stdout, "c", false, "write to stdout")
+	flagSet.BoolVar(&opts.Stdout, "stdout", false, "write to stdout")
+	
+	// Name flags
+	flagSet.BoolVar(&opts.NoName, "n", false, "don't save/restore original filename and timestamp")
+	flagSet.BoolVar(&opts.NoName, "no-name", false, "don't save/restore original filename and timestamp")
+	flagSet.BoolVar(&opts.Name, "N", true, "save/restore original filename and timestamp")
+	flagSet.BoolVar(&opts.Name, "name", true, "save/restore original filename and timestamp")
 
-	// Compression options
-	flag.IntVar(&opts.Level, "1", 1, "fastest compression")
-	flag.IntVar(&opts.Level, "2", 2, "")
-	flag.IntVar(&opts.Level, "3", 3, "")
-	flag.IntVar(&opts.Level, "4", 4, "")
-	flag.IntVar(&opts.Level, "5", 5, "")
-	flag.IntVar(&opts.Level, "6", 6, "")
-	flag.IntVar(&opts.Level, "7", 7, "")
-	flag.IntVar(&opts.Level, "8", 8, "")
-	flag.IntVar(&opts.Level, "9", 9, "best compression")
-	flag.IntVar(&opts.Level, "best", 9, "best compression")
-	flag.IntVar(&opts.Level, "fast", 1, "fastest compression")
+	// Information and testing
+	flagSet.BoolVar(&opts.List, "l", false, "list compressed file contents")
+	flagSet.BoolVar(&opts.List, "list", false, "list compressed file contents")
+	flagSet.BoolVar(&opts.Test, "t", false, "test compressed file integrity")
+	flagSet.BoolVar(&opts.Test, "test", false, "test compressed file integrity")
+	flagSet.BoolVar(&opts.Verbose, "v", false, "verbose mode")
+	flagSet.BoolVar(&opts.Verbose, "verbose", false, "verbose mode")
+	flagSet.BoolVar(&opts.Quiet, "q", false, "suppress warnings")
+	flagSet.BoolVar(&opts.Quiet, "quiet", false, "suppress warnings")
+
+	// Other options
+	flagSet.BoolVar(&opts.Recursive, "r", false, "recursively compress files in directories")
+	flagSet.BoolVar(&opts.Recursive, "recursive", false, "recursively compress files in directories")
+	flagSet.StringVar(&opts.Suffix, "S", fileExtension, "use suffix instead of .zst")
+	flagSet.StringVar(&opts.Suffix, "suffix", fileExtension, "use suffix instead of .zst")
+	
+	// Help and version
+	flagSet.BoolVar(&opts.Help, "h", false, "display help message")
+	flagSet.BoolVar(&opts.Help, "help", false, "display help message")
+	flagSet.BoolVar(&opts.Version, "version", false, "show version information")
+
+	// Force overwrite
+	flagSet.BoolVar(&opts.Force, "f", false, "force overwrite")
+	flagSet.BoolVar(&opts.Force, "force", false, "force overwrite")
 
 	// Extended options
-	flag.StringVar(&opts.FrameSize, "frame-size", defaultFrameSize, "seekable frame size")
+	flagSet.StringVar(&opts.FrameSize, "frame-size", defaultFrameSize, "seekable frame size")
 	var startFrame, endFrame uint
-	flag.UintVar(&startFrame, "start-frame", 0, "start decompression at frame")
-	flag.UintVar(&endFrame, "end-frame", 0, "end decompression at frame")
+	flagSet.UintVar(&startFrame, "start-frame", 0, "start decompression at frame")
+	flagSet.UintVar(&endFrame, "end-frame", 0, "end decompression at frame")
 
-	flag.Parse()
+	// Parse flags
+	if err := flagSet.Parse(os.Args[1:]); err != nil {
+		if err == flag.ErrHelp {
+			opts.Help = true
+		} else {
+			fmt.Fprintf(os.Stderr, "%s: %v\n", programName, err)
+			fmt.Fprintf(os.Stderr, "Try '%s --help' for more information.\n", programName)
+			os.Exit(1)
+		}
+	}
 
-	// Set default compression level if not explicitly set
-	if opts.Level == 0 {
-		opts.Level = defaultCompressionLevel
+	// Handle compression level shortcuts
+	for i := 1; i <= 9; i++ {
+		if flagSet.Lookup(fmt.Sprintf("%d", i)).Value.String() == "true" {
+			opts.Level = i
+			break
+		}
 	}
 
 	// Convert uint to uint32
 	opts.StartFrame = uint32(startFrame)
 	opts.EndFrame = uint32(endFrame)
 
-	// Default is to keep files (unless -rm is specified)
-	// The -k flag is now deprecated but still works
-	if !opts.Remove {
-		opts.Keep = true
+	// Set keep behavior
+	opts.Keep = !opts.NoKeep
+
+	// Handle -c flag conflict (it can mean compression level or stdout)
+	// If -c is followed by a number, it's compression level, otherwise stdout
+	args := os.Args[1:]
+	for i, arg := range args {
+		if arg == "-c" && i+1 < len(args) {
+			// Check if next arg is a number
+			var level int
+			if _, err := fmt.Sscanf(args[i+1], "%d", &level); err == nil && level >= 1 && level <= 9 {
+				opts.Level = level
+				opts.Stdout = false
+			}
+		}
+	}
+
+	// If name flags weren't explicitly set, default to true
+	if !opts.NoName {
+		opts.Name = true
 	}
 
 	return opts
+}
+
+func showHelp() {
+	fmt.Printf(`%s - Seekable zstd compression utility
+
+Basic Usage:
+  %s -nk file.txt      Compress file.txt (creates file.txt%s and removes original)
+  %s file.txt          Compress file.txt (creates file.txt%s and keeps the original)
+  %s -d file.txt.zst   Decompress file
+
+Compression Options:
+  -c, --compression=1 to 9  Compression level (1=fastest, 9=best compression, 6=default)
+  -nk, --no-keep           Don't keep the original files (The default is to keep files)
+
+Output Control:
+  -c, --stdout             Write to standard output, keep original files
+  -n, --no-name            Don't save/restore original filename and timestamp
+  -N, --name               Save/restore original filename and timestamp (default)
+
+Information and Testing:
+  -l, --list               List compressed file contents
+  -t, --test               Test compressed file integrity
+  -v, --verbose            Display compression ratio and other info
+  -q, --quiet              Suppress warnings
+
+Other Options:
+  -r, --recursive          Recursively compress files in directories
+  -S, --suffix=SUF         Use suffix SUF instead of %s
+  -h, --help               Display help message
+  --version                Show version information
+  -f, --force              Force overwrite of output files
+
+Extended Options:
+  --frame-size=SIZE        Set seekable frame size (default: %s)
+  --start-frame=N          Start decompression at frame N
+  --end-frame=N            End decompression at frame N
+
+Examples:
+  %s file.txt              # Compress file.txt to file.txt%s
+  %s -d file.txt%s         # Decompress to file.txt
+  %s -c file.txt > out%s   # Compress to stdout
+  %s -l file.txt%s         # List archive contents
+  %s -r directory          # Recursively compress files in directory
+
+`, programName, programName, fileExtension, programName, fileExtension, programName,
+		fileExtension, defaultFrameSize,
+		programName, fileExtension,
+		programName, fileExtension,
+		programName, fileExtension,
+		programName, fileExtension,
+		programName)
 }
 
 func compressFile(inputFile string, opts *Options) error {
@@ -155,7 +306,7 @@ func compressFile(inputFile string, opts *Options) error {
 	defer input.Close()
 
 	// Determine output
-	outputFile := getOutputFileName(inputFile, fileExtension, opts.Stdout)
+	outputFile := getOutputFileName(inputFile, opts.Suffix, opts.Stdout)
 
 	// Open output
 	output, err := openOutput(outputFile, opts.Force)
@@ -204,22 +355,22 @@ func compressFile(inputFile string, opts *Options) error {
 	if opts.Verbose && outputFile != "-" {
 		compressedSize := encoder.WrittenCompressed()
 		ratio := float64(written) / float64(compressedSize) * 100
-		if opts.Remove {
+		if !opts.Keep {
 			fmt.Printf("%s:\t%.1f%% -- replaced with %s\n", inputFile, ratio, outputFile)
 		} else {
 			fmt.Printf("%s:\t%.1f%% -- compressed to %s\n", inputFile, ratio, outputFile)
 		}
 	}
 
-	// Remove original file only if explicitly requested
-	if opts.Remove && inputFile != "-" && outputFile != "-" {
+	// Remove original file if no-keep is set
+	if !opts.Keep && inputFile != "-" && outputFile != "-" {
 		if err := os.Remove(inputFile); err != nil {
 			return err
 		}
 	}
 
-	// Preserve file times
-	if inputInfo != nil && outputFile != "-" {
+	// Preserve file times if name preservation is enabled
+	if opts.Name && inputInfo != nil && outputFile != "-" {
 		os.Chtimes(outputFile, inputInfo.ModTime(), inputInfo.ModTime())
 	}
 
@@ -235,7 +386,7 @@ func decompressFile(inputFile string, opts *Options) error {
 	defer input.Close()
 
 	// Check if file has correct extension
-	if inputFile != "-" && !strings.HasSuffix(inputFile, fileExtension) {
+	if inputFile != "-" && !strings.HasSuffix(inputFile, opts.Suffix) {
 		return fmt.Errorf("unknown suffix -- ignored")
 	}
 
@@ -301,15 +452,15 @@ func decompressFile(inputFile string, opts *Options) error {
 		fmt.Printf("%s:\t%s\n", inputFile, outputFile)
 	}
 
-	// Remove original file only if explicitly requested
-	if opts.Remove && inputFile != "-" && outputFile != "-" {
+	// Remove original file if no-keep is set
+	if !opts.Keep && inputFile != "-" && outputFile != "-" {
 		if err := os.Remove(inputFile); err != nil {
 			return err
 		}
 	}
 
-	// Preserve file times
-	if inputInfo != nil && outputFile != "-" {
+	// Preserve file times if name preservation is enabled
+	if opts.Name && inputInfo != nil && outputFile != "-" {
 		os.Chtimes(outputFile, inputInfo.ModTime(), inputInfo.ModTime())
 	}
 
@@ -364,7 +515,7 @@ func listFile(inputFile string, opts *Options) error {
 			totalCompressed,
 			totalDecompressed,
 			ratio,
-			strings.TrimSuffix(inputFile, fileExtension))
+			strings.TrimSuffix(inputFile, opts.Suffix))
 
 		// Frame details
 		fmt.Printf("\nFrames: %d\n", seekTable.NumFrames())
@@ -378,11 +529,12 @@ func listFile(inputFile string, opts *Options) error {
 		}
 	} else {
 		// Standard format
+		uncompressedName := strings.TrimSuffix(inputFile, opts.Suffix)
 		fmt.Printf("%12d %12d %5.1f%% %s\n",
 			totalCompressed,
 			totalDecompressed,
 			ratio,
-			inputFile)
+			uncompressedName)
 	}
 
 	return nil
@@ -474,8 +626,10 @@ func getOutputFileName(inputFile, extension string, toStdout bool) string {
 	}
 
 	// Decompressing: remove extension
-	if strings.HasSuffix(inputFile, fileExtension) {
-		return strings.TrimSuffix(inputFile, fileExtension)
+	for _, suffix := range []string{".zst", ".gz", ".Z"} {
+		if strings.HasSuffix(inputFile, suffix) {
+			return strings.TrimSuffix(inputFile, suffix)
+		}
 	}
 
 	return inputFile + ".out"
