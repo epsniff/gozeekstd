@@ -253,7 +253,9 @@ func TestDecoder_NoSeekTable(t *testing.T) {
 }
 
 func TestDecoder_WithDictionary(t *testing.T) {
-	dict := []byte("test dictionary")
+	// Create a larger dictionary that's more suitable for zstd
+	// Dictionary should contain common patterns from the data
+	dict := []byte("Test data with dictionary compression testing sample text that contains common patterns and repetitions for better compression ratios")
 	
 	// Create archive with dictionary
 	var buf bytes.Buffer
@@ -265,7 +267,7 @@ func TestDecoder_WithDictionary(t *testing.T) {
 		t.Fatalf("Failed to create encoder: %v", err)
 	}
 	
-	testData := []byte("Test data with dictionary")
+	testData := []byte("Test data with dictionary compression testing")
 	encoder.Write(testData)
 	encoder.Finish()
 	
