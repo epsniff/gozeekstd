@@ -224,7 +224,6 @@ func parseOptions() *Options {
 
 	// Handle -c flag with optional argument
 	// If -c is followed by a number 1-9, it's compression level, otherwise stdout
-	args := flagSet.Args()
 	rawArgs := os.Args[1:]
 	for i, arg := range rawArgs {
 		if arg == "-c" && i+1 < len(rawArgs) {
