@@ -41,7 +41,7 @@ func TestNewDecoder(t *testing.T) {
 	archive := createTestArchive(t, frames)
 	
 	// Create decoder
-	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), nil)
+	decoder, err := NewDecoder(archive, nil)
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestDecoder_Read(t *testing.T) {
 	}
 	archive := createTestArchive(t, frames)
 	
-	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), nil)
+	decoder, err := NewDecoder(archive, nil)
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestDecoder_Seek(t *testing.T) {
 	}
 	archive := createTestArchive(t, frames)
 	
-	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), nil)
+	decoder, err := NewDecoder(archive, nil)
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestDecoder_FrameBoundaries(t *testing.T) {
 		UpperFrame: 2,
 	}
 	
-	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), opts)
+	decoder, err := NewDecoder(archive, opts)
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestDecoder_ReadWithPrefix(t *testing.T) {
 	}
 	archive := createTestArchive(t, frames)
 	
-	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), nil)
+	decoder, err := NewDecoder(archive, nil)
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestDecoder_SetBoundaries(t *testing.T) {
 	}
 	archive := createTestArchive(t, frames)
 	
-	decoder, err := NewDecoder(bytes.NewReader(archive.Bytes()), nil)
+	decoder, err := NewDecoder(archive, nil)
 	if err != nil {
 		t.Fatalf("NewDecoder failed: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestDecoder_NoSeekTable(t *testing.T) {
 	var buf bytes.Buffer
 	buf.Write([]byte("Not a valid seekable archive"))
 	
-	_, err := NewDecoder(bytes.NewReader(buf.Bytes()), nil)
+	_, err := NewDecoder(&buf, nil)
 	if err == nil {
 		t.Error("Expected error for archive without seek table")
 	}
@@ -254,7 +254,7 @@ func TestDecoder_WithDictionary(t *testing.T) {
 	encoder.Finish()
 	
 	// Decode with dictionary
-	decoder, err := NewDecoder(bytes.NewReader(buf.Bytes()), &DecoderOptions{
+	decoder, err := NewDecoder(&buf, &DecoderOptions{
 		Dict: dict,
 	})
 	if err != nil {
