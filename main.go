@@ -416,8 +416,15 @@ func decompressFile(inputFile string, opts *Options) error {
 	}
 
 	// Determine output
-	outputFile := getOutputFileName(inputFile, "", opts.Stdout)
-	if outputFile == inputFile {
+	var outputFile string
+	if opts.DecompressTo != "" {
+		outputFile = opts.DecompressTo
+	} else {
+		outputFile = getOutputFileName(inputFile, "", opts.Stdout)
+	}
+	
+	// Check if we would overwrite the input file
+	if outputFile == inputFile && inputFile != "-" {
 		return fmt.Errorf("would overwrite input file")
 	}
 
