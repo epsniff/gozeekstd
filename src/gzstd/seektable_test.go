@@ -1,7 +1,6 @@
 package gzstd
 
 import (
-	"bytes"
 	"encoding/binary"
 	"testing"
 )
