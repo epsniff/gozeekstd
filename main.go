@@ -26,6 +26,7 @@ type Options struct {
 	Stdout     bool
 	Force      bool
 	Keep       bool
+	Remove     bool  // New flag to explicitly remove original files
 	Quiet      bool
 	Verbose    bool
 	Test       bool
@@ -86,8 +87,10 @@ func parseOptions() *Options {
 	// Output flags
 	flag.BoolVar(&opts.Stdout, "c", false, "write to stdout")
 	flag.BoolVar(&opts.Stdout, "stdout", false, "write to stdout")
-	flag.BoolVar(&opts.Keep, "k", false, "keep original files")
-	flag.BoolVar(&opts.Keep, "keep", false, "keep original files")
+	flag.BoolVar(&opts.Keep, "k", false, "keep original files (deprecated, now default)")
+	flag.BoolVar(&opts.Keep, "keep", false, "keep original files (deprecated, now default)")
+	flag.BoolVar(&opts.Remove, "rm", false, "remove original files after successful compression")
+	flag.BoolVar(&opts.Remove, "remove", false, "remove original files after successful compression")
 	
 	// Behavior flags
 	flag.BoolVar(&opts.Force, "f", false, "force overwrite")
@@ -126,6 +129,12 @@ func parseOptions() *Options {
 	// Convert uint to uint32
 	opts.StartFrame = uint32(startFrame)
 	opts.EndFrame = uint32(endFrame)
+	
+	// Default is to keep files (unless -rm is specified)
+	// The -k flag is now deprecated but still works
+	if !opts.Remove {
+		opts.Keep = true
+	}
 	
 	return opts
 }
@@ -194,11 +203,15 @@ func compressFile(inputFile string, opts *Options) error {
 	if opts.Verbose && outputFile != "-" {
 		compressedSize := encoder.WrittenCompressed()
 		ratio := float64(written) / float64(compressedSize) * 100
-		fmt.Printf("%s:\t%.1f%% -- replaced with %s\n", inputFile, ratio, outputFile)
+		if opts.Remove {
+			fmt.Printf("%s:\t%.1f%% -- replaced with %s\n", inputFile, ratio, outputFile)
+		} else {
+			fmt.Printf("%s:\t%.1f%% -- compressed to %s\n", inputFile, ratio, outputFile)
+		}
 	}
 
-	// Remove original file if not keeping
-	if !opts.Keep && inputFile != "-" && outputFile != "-" {
+	// Remove original file only if explicitly requested
+	if opts.Remove && inputFile != "-" && outputFile != "-" {
 		if err := os.Remove(inputFile); err != nil {
 			return err
 		}
@@ -287,8 +300,8 @@ func decompressFile(inputFile string, opts *Options) error {
 		fmt.Printf("%s:\t%s\n", inputFile, outputFile)
 	}
 
-	// Remove original file if not keeping
-	if !opts.Keep && inputFile != "-" && outputFile != "-" {
+	// Remove original file only if explicitly requested
+	if opts.Remove && inputFile != "-" && outputFile != "-" {
 		if err := os.Remove(inputFile); err != nil {
 			return err
 		}
