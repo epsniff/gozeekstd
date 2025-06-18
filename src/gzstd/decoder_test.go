@@ -9,6 +9,7 @@ import (
 func createTestArchive(t *testing.T, frames [][]byte) *bytes.Buffer {
 	var buf bytes.Buffer
 	encoder, err := NewEncoder(&buf, &EncoderOptions{
+		Level:       zstd.SpeedDefault,
 		FramePolicy: UncompressedFrameSize{Size: 1000}, // Force frame boundaries
 	})
 	if err != nil {
@@ -254,6 +255,7 @@ func TestDecoder_WithDictionary(t *testing.T) {
 	// Create archive with dictionary
 	var buf bytes.Buffer
 	encoder, err := NewEncoder(&buf, &EncoderOptions{
+		Level:           zstd.SpeedDefault,
 		CompressionDict: dict,
 	})
 	if err != nil {
