@@ -47,7 +47,7 @@ type Options struct {
 }
 
 func main() {
-	opts := parseOptions()
+	opts, args := parseOptions()
 
 	// Handle help and version
 	if opts.Help {
@@ -59,7 +59,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	files := flagSet.Args()
+	files := args
 	if len(files) == 0 {
 		files = []string{"-"} // Default to stdin
 	}
@@ -131,7 +131,7 @@ func processDirectory(dir string, opts *Options) error {
 	})
 }
 
-func parseOptions() *Options {
+func parseOptions() (*Options, []string) {
 	opts := &Options{
 		Suffix: fileExtension,
 	}
@@ -260,7 +260,7 @@ func parseOptions() *Options {
 		opts.Name = true
 	}
 
-	return opts
+	return opts, flagSet.Args()
 }
 
 func showHelp() {
