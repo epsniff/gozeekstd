@@ -191,6 +191,11 @@ func parseOptions() *Options {
 	flagSet.UintVar(&startFrame, "start-frame", 0, "start decompression at frame")
 	flagSet.UintVar(&endFrame, "end-frame", 0, "end decompression at frame")
 
+	// Add compression level shortcuts (1-9) before parsing
+	for i := 1; i <= 9; i++ {
+		flagSet.Bool(fmt.Sprintf("%d", i), false, fmt.Sprintf("compression level %d", i))
+	}
+
 	// Parse flags
 	if err := flagSet.Parse(os.Args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -199,6 +204,14 @@ func parseOptions() *Options {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", programName, err)
 			fmt.Fprintf(os.Stderr, "Try '%s --help' for more information.\n", programName)
 			os.Exit(1)
+		}
+	}
+
+	// Handle compression level shortcuts
+	for i := 1; i <= 9; i++ {
+		if flagSet.Lookup(fmt.Sprintf("%d", i)).Value.String() == "true" {
+			opts.Level = i
+			break
 		}
 	}
 
