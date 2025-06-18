@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"gozeekstd/src/gzstd"
@@ -12,135 +13,168 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-func main() {
-	compress := flag.Bool("c", false, "Compress mode")
-	decompress := flag.Bool("d", false, "Decompress mode")
-	list := flag.Bool("l", false, "List frames in seekable archive")
-	level := flag.Int("level", 3, "Compression level (1-19)")
-	frameSize := flag.String("frame-size", "512K", "Frame size (e.g., 512K, 1M, 4M)")
-	output := flag.String("o", "", "Output file (default: stdout or input.zst)")
-	force := flag.Bool("f", false, "Force overwrite existing files")
-	startFrame := flag.Uint("start-frame", 0, "Start decompression at frame")
-	endFrame := flag.Uint("end-frame", 0, "End decompression at frame (0 = end)")
+const (
+	defaultCompressionLevel = 3
+	defaultFrameSize        = "512K"
+	programName             = "gzstd"
+	fileExtension           = ".zst"
+)
 
-	flag.Parse()
-
-	// Default to compression if no mode specified
-	if !*compress && !*decompress && !*list {
-		*compress = true
-	}
-
-	// Validate modes
-	modeCount := 0
-	if *compress {
-		modeCount++
-	}
-	if *decompress {
-		modeCount++
-	}
-	if *list {
-		modeCount++
-	}
-	if modeCount > 1 {
-		fmt.Fprintf(os.Stderr, "Error: Only one mode (-c, -d, -l) can be specified\n")
-		os.Exit(1)
-	}
-
-	// Get input file
-	inputFile := "-"
-	if flag.NArg() > 0 {
-		inputFile = flag.Arg(0)
-	}
-
-	// Execute the appropriate mode
-	var err error
-	switch {
-	case *list:
-		err = listFrames(inputFile)
-	case *decompress:
-		err = decompressFile(inputFile, *output, *force, uint32(*startFrame), uint32(*endFrame))
-	default:
-		err = compressFile(inputFile, *output, *force, *level, *frameSize)
-	}
-
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
+// Options holds command-line options
+type Options struct {
+	Decompress bool
+	List       bool
+	Stdout     bool
+	Force      bool
+	Keep       bool
+	Quiet      bool
+	Verbose    bool
+	Test       bool
+	Level      int
+	FrameSize  string
+	StartFrame uint32
+	EndFrame   uint32
 }
 
-func compressFile(inputFile, outputFile string, force bool, level int, frameSizeStr string) error {
+func main() {
+	opts := parseOptions()
+	
+	files := flag.Args()
+	if len(files) == 0 {
+		files = []string{"-"} // Default to stdin
+	}
+
+	// Execute the appropriate operation
+	var exitCode int
+	for _, file := range files {
+		var err error
+		switch {
+		case opts.List:
+			err = listFile(file, opts)
+		case opts.Test:
+			err = testFile(file, opts)
+		case opts.Decompress:
+			err = decompressFile(file, opts)
+		default:
+			err = compressFile(file, opts)
+		}
+		
+		if err != nil {
+			if !opts.Quiet {
+				fmt.Fprintf(os.Stderr, "%s: %s: %v\n", programName, file, err)
+			}
+			exitCode = 1
+		}
+	}
+	
+	os.Exit(exitCode)
+}
+
+func parseOptions() *Options {
+	opts := &Options{}
+	
+	// Decompress flags (multiple aliases like gzip)
+	flag.BoolVar(&opts.Decompress, "d", false, "decompress")
+	flag.BoolVar(&opts.Decompress, "decompress", false, "decompress")
+	flag.BoolVar(&opts.Decompress, "uncompress", false, "decompress")
+	
+	// List/test flags
+	flag.BoolVar(&opts.List, "l", false, "list compressed file contents")
+	flag.BoolVar(&opts.List, "list", false, "list compressed file contents")
+	flag.BoolVar(&opts.Test, "t", false, "test compressed file integrity")
+	flag.BoolVar(&opts.Test, "test", false, "test compressed file integrity")
+	
+	// Output flags
+	flag.BoolVar(&opts.Stdout, "c", false, "write to stdout")
+	flag.BoolVar(&opts.Stdout, "stdout", false, "write to stdout")
+	flag.BoolVar(&opts.Keep, "k", false, "keep original files")
+	flag.BoolVar(&opts.Keep, "keep", false, "keep original files")
+	
+	// Behavior flags
+	flag.BoolVar(&opts.Force, "f", false, "force overwrite")
+	flag.BoolVar(&opts.Force, "force", false, "force overwrite")
+	flag.BoolVar(&opts.Quiet, "q", false, "suppress all warnings")
+	flag.BoolVar(&opts.Quiet, "quiet", false, "suppress all warnings")
+	flag.BoolVar(&opts.Verbose, "v", false, "verbose mode")
+	flag.BoolVar(&opts.Verbose, "verbose", false, "verbose mode")
+	
+	// Compression options
+	flag.IntVar(&opts.Level, "1", 1, "fastest compression")
+	flag.IntVar(&opts.Level, "2", 2, "")
+	flag.IntVar(&opts.Level, "3", 3, "")
+	flag.IntVar(&opts.Level, "4", 4, "")
+	flag.IntVar(&opts.Level, "5", 5, "")
+	flag.IntVar(&opts.Level, "6", 6, "")
+	flag.IntVar(&opts.Level, "7", 7, "")
+	flag.IntVar(&opts.Level, "8", 8, "")
+	flag.IntVar(&opts.Level, "9", 9, "best compression")
+	flag.IntVar(&opts.Level, "best", 9, "best compression")
+	flag.IntVar(&opts.Level, "fast", 1, "fastest compression")
+	
+	// Extended options
+	flag.StringVar(&opts.FrameSize, "frame-size", defaultFrameSize, "seekable frame size")
+	flag.UintVar(&opts.StartFrame, "start-frame", 0, "start decompression at frame")
+	flag.UintVar(&opts.EndFrame, "end-frame", 0, "end decompression at frame")
+	
+	flag.Parse()
+	
+	// Set default compression level if not explicitly set
+	if opts.Level == 0 {
+		opts.Level = defaultCompressionLevel
+	}
+	
+	return opts
+}
+
+func compressFile(inputFile string, opts *Options) error {
 	// Parse frame size
-	frameSize, err := parseByteSize(frameSizeStr)
+	frameSize, err := parseByteSize(opts.FrameSize)
 	if err != nil {
 		return fmt.Errorf("invalid frame size: %v", err)
 	}
 
 	// Open input
-	var input io.ReadCloser
-	if inputFile == "-" {
-		input = os.Stdin
-	} else {
-		f, err := os.Open(inputFile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		input = f
+	input, inputInfo, err := openInput(inputFile)
+	if err != nil {
+		return err
 	}
+	defer input.Close()
 
-	// Determine output file
-	if outputFile == "" {
-		if inputFile == "-" {
-			outputFile = "-"
-		} else {
-			outputFile = inputFile + ".zst"
-		}
-	}
-
+	// Determine output
+	outputFile := getOutputFileName(inputFile, fileExtension, opts.Stdout)
+	
 	// Open output
-	var output io.WriteCloser
-	if outputFile == "-" {
-		output = os.Stdout
-	} else {
-		// Check if file exists
-		if !force {
-			if _, err := os.Stat(outputFile); err == nil {
-				return fmt.Errorf("output file exists: %s (use -f to overwrite)", outputFile)
+	output, err := openOutput(outputFile, opts.Force)
+	if err != nil {
+		return err
+	}
+	
+	// Setup cleanup
+	var outputClosed bool
+	defer func() {
+		if !outputClosed {
+			output.Close()
+			// Remove partial output on error
+			if outputFile != "-" && err != nil {
+				os.Remove(outputFile)
 			}
 		}
-		f, err := os.Create(outputFile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		output = f
-	}
+	}()
 
 	// Create encoder
-	opts := gzstd.DefaultEncoderOptions()
-	opts.Level = zstd.SpeedDefault
-	opts.FramePolicy = gzstd.CompressedFrameSize{Size: uint32(frameSize)}
+	encoderOpts := gzstd.DefaultEncoderOptions()
+	encoderOpts.Level = getZstdLevel(opts.Level)
+	encoderOpts.FramePolicy = gzstd.CompressedFrameSize{Size: uint32(frameSize)}
 
-	encoder, err := gzstd.NewEncoder(output, opts)
+	encoder, err := gzstd.NewEncoder(output, encoderOpts)
 	if err != nil {
 		return err
 	}
 
 	// Compress data
-	buf := make([]byte, 32*1024)
-	for {
-		n, err := input.Read(buf)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if n == 0 {
-			break
-		}
-
-		if _, err := encoder.Write(buf[:n]); err != nil {
-			return err
-		}
+	written, err := io.Copy(encoder, input)
+	if err != nil {
+		return err
 	}
 
 	// Finish compression
@@ -148,103 +182,125 @@ func compressFile(inputFile, outputFile string, force bool, level int, frameSize
 		return err
 	}
 
-	// Print statistics if not stdout
-	if outputFile != "-" {
-		fmt.Printf("Compressed %s -> %s\n", inputFile, outputFile)
-		fmt.Printf("Frames: %d, Compressed size: %d bytes\n",
-			encoder.SeekTable().NumFrames(), encoder.WrittenCompressed())
+	// Close output
+	output.Close()
+	outputClosed = true
+
+	// Print statistics
+	if opts.Verbose && outputFile != "-" {
+		compressedSize := encoder.WrittenCompressed()
+		ratio := float64(written) / float64(compressedSize) * 100
+		fmt.Printf("%s:\t%.1f%% -- replaced with %s\n", inputFile, ratio, outputFile)
+	}
+
+	// Remove original file if not keeping
+	if !opts.Keep && inputFile != "-" && outputFile != "-" {
+		if err := os.Remove(inputFile); err != nil {
+			return err
+		}
+	}
+
+	// Preserve file times
+	if inputInfo != nil && outputFile != "-" {
+		os.Chtimes(outputFile, inputInfo.ModTime(), inputInfo.ModTime())
 	}
 
 	return nil
 }
 
-func decompressFile(inputFile, outputFile string, force bool, startFrame, endFrame uint32) error {
+func decompressFile(inputFile string, opts *Options) error {
 	// Open input
-	var input *os.File
-	if inputFile == "-" {
-		input = os.Stdin
-	} else {
-		f, err := os.Open(inputFile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		input = f
+	input, inputInfo, err := openInput(inputFile)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+
+	// Check if file has correct extension
+	if inputFile != "-" && !strings.HasSuffix(inputFile, fileExtension) {
+		return fmt.Errorf("unknown suffix -- ignored")
 	}
 
-	// Determine output file
-	if outputFile == "" {
-		if inputFile == "-" {
-			outputFile = "-"
-		} else {
-			outputFile = strings.TrimSuffix(inputFile, ".zst")
-			if outputFile == inputFile {
-				outputFile = inputFile + ".out"
-			}
-		}
+	// Determine output
+	outputFile := getOutputFileName(inputFile, "", opts.Stdout)
+	if outputFile == inputFile {
+		return fmt.Errorf("would overwrite input file")
 	}
-
+	
 	// Open output
-	var output io.WriteCloser
-	if outputFile == "-" {
-		output = os.Stdout
-	} else {
-		// Check if file exists
-		if !force {
-			if _, err := os.Stat(outputFile); err == nil {
-				return fmt.Errorf("output file exists: %s (use -f to overwrite)", outputFile)
+	output, err := openOutput(outputFile, opts.Force)
+	if err != nil {
+		return err
+	}
+	
+	// Setup cleanup
+	var outputClosed bool
+	defer func() {
+		if !outputClosed {
+			output.Close()
+			// Remove partial output on error
+			if outputFile != "-" && err != nil {
+				os.Remove(outputFile)
 			}
 		}
-		f, err := os.Create(outputFile)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		output = f
-	}
+	}()
 
 	// Create decoder
-	opts := gzstd.DefaultDecoderOptions()
-	opts.LowerFrame = startFrame
-	opts.UpperFrame = endFrame
+	decoderOpts := gzstd.DefaultDecoderOptions()
+	decoderOpts.LowerFrame = opts.StartFrame
+	decoderOpts.UpperFrame = opts.EndFrame
 
-	decoder, err := gzstd.NewDecoder(input, opts)
+	// Create seekable reader if needed
+	var seekableInput gzstd.Seekable
+	if inputFile == "-" {
+		// For stdin, we need to buffer the entire input
+		data, err := io.ReadAll(input)
+		if err != nil {
+			return err
+		}
+		seekableInput = bytes.NewReader(data)
+	} else {
+		seekableInput = input.(*os.File)
+	}
+
+	decoder, err := gzstd.NewDecoder(seekableInput, decoderOpts)
 	if err != nil {
 		return err
 	}
 
 	// Decompress data
-	buf := make([]byte, 32*1024)
-	totalBytes := int64(0)
-	for {
-		n, err := decoder.Read(buf)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if n == 0 {
-			break
-		}
-
-		if _, err := output.Write(buf[:n]); err != nil {
-			return err
-		}
-		totalBytes += int64(n)
+	written, err := io.Copy(output, decoder)
+	if err != nil {
+		return err
 	}
 
-	// Print statistics if not stdout
-	if outputFile != "-" {
-		fmt.Printf("Decompressed %s -> %s\n", inputFile, outputFile)
-		fmt.Printf("Decompressed size: %d bytes\n", totalBytes)
+	// Close output
+	output.Close()
+	outputClosed = true
+
+	// Print statistics
+	if opts.Verbose && outputFile != "-" {
+		fmt.Printf("%s:\t%s\n", inputFile, outputFile)
+	}
+
+	// Remove original file if not keeping
+	if !opts.Keep && inputFile != "-" && outputFile != "-" {
+		if err := os.Remove(inputFile); err != nil {
+			return err
+		}
+	}
+
+	// Preserve file times
+	if inputInfo != nil && outputFile != "-" {
+		os.Chtimes(outputFile, inputInfo.ModTime(), inputInfo.ModTime())
 	}
 
 	return nil
 }
 
-func listFrames(inputFile string) error {
-	// Open input
-	// var input *os.File
+func listFile(inputFile string, opts *Options) error {
 	if inputFile == "-" {
-		return fmt.Errorf("cannot list frames from stdin")
+		return fmt.Errorf("cannot list from stdin")
 	}
 
 	f, err := os.Open(inputFile)
@@ -253,36 +309,19 @@ func listFrames(inputFile string) error {
 	}
 	defer f.Close()
 
+	// Get file info
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+
 	// Read seek table
-	footer, err := gzstd.ReadSeekTableFooter(f)
+	seekTable, err := readSeekTable(f)
 	if err != nil {
-		return fmt.Errorf("failed to read seek table: %v", err)
-	}
-
-	seekTableSize, err := gzstd.ParseSeekTableSize(footer)
-	if err != nil {
-		return fmt.Errorf("failed to parse seek table size: %v", err)
-	}
-
-	// Read full seek table
-	if _, err := f.Seek(-int64(seekTableSize), io.SeekEnd); err != nil {
 		return err
 	}
 
-	seekTableData := make([]byte, seekTableSize)
-	if _, err := io.ReadFull(f, seekTableData); err != nil {
-		return err
-	}
-
-	seekTable, err := gzstd.ParseSeekTable(seekTableData)
-	if err != nil {
-		return fmt.Errorf("failed to parse seek table: %v", err)
-	}
-
-	// Print summary
-	fmt.Printf("File: %s\n", filepath.Base(inputFile))
-	fmt.Printf("Frames: %d\n", seekTable.NumFrames())
-
+	// Calculate totals
 	totalCompressed := uint64(0)
 	totalDecompressed := uint64(0)
 	if seekTable.NumFrames() > 0 {
@@ -290,28 +329,187 @@ func listFrames(inputFile string) error {
 		totalDecompressed, _ = seekTable.FrameEndDecomp(seekTable.NumFrames() - 1)
 	}
 
-	fmt.Printf("Compressed size: %s (%d bytes)\n", formatBytes(totalCompressed), totalCompressed)
-	fmt.Printf("Decompressed size: %s (%d bytes)\n", formatBytes(totalDecompressed), totalDecompressed)
-	if totalCompressed > 0 {
-		ratio := float64(totalDecompressed) / float64(totalCompressed)
-		fmt.Printf("Compression ratio: %.2f:1\n", ratio)
+	// Add seek table overhead to compressed size
+	totalCompressed = uint64(info.Size())
+
+	// Print in gzip-like format
+	ratio := 0.0
+	if totalDecompressed > 0 {
+		ratio = float64(totalCompressed) / float64(totalDecompressed) * 100
 	}
 
-	// Print frame details
-	fmt.Printf("\nFrame details:\n")
-	fmt.Printf("%-10s %-15s %-15s %-10s\n", "Frame", "Compressed", "Decompressed", "Ratio")
-	fmt.Printf("%-10s %-15s %-15s %-10s\n", "-----", "----------", "------------", "-----")
-
-	for i := uint32(0); i < seekTable.NumFrames(); i++ {
-		cSize, _ := seekTable.FrameSizeComp(i)
-		dSize, _ := seekTable.FrameSizeDecomp(i)
-		ratio := float64(dSize) / float64(cSize)
-
-		fmt.Printf("%-10d %-15s %-15s %-10.2f\n",
-			i, formatBytes(cSize), formatBytes(dSize), ratio)
+	if opts.Verbose {
+		// Verbose format with frame details
+		fmt.Printf("method  crc     date  time  compressed uncompressed  ratio uncompressed_name\n")
+		fmt.Printf("defla 00000000 %s %12d %12d %5.1f%% %s\n",
+			info.ModTime().Format("Jan _2 15:04"),
+			totalCompressed,
+			totalDecompressed,
+			ratio,
+			strings.TrimSuffix(inputFile, fileExtension))
+		
+		// Frame details
+		fmt.Printf("\nFrames: %d\n", seekTable.NumFrames())
+		for i := uint32(0); i < seekTable.NumFrames() && i < 10; i++ {
+			cSize, _ := seekTable.FrameSizeComp(i)
+			dSize, _ := seekTable.FrameSizeDecomp(i)
+			fmt.Printf("  Frame %d: %d -> %d bytes\n", i, cSize, dSize)
+		}
+		if seekTable.NumFrames() > 10 {
+			fmt.Printf("  ... and %d more frames\n", seekTable.NumFrames()-10)
+		}
+	} else {
+		// Standard format
+		fmt.Printf("%12d %12d %5.1f%% %s\n",
+			totalCompressed,
+			totalDecompressed,
+			ratio,
+			inputFile)
 	}
 
 	return nil
+}
+
+func testFile(inputFile string, opts *Options) error {
+	// Open input
+	input, _, err := openInput(inputFile)
+	if err != nil {
+		return err
+	}
+	defer input.Close()
+
+	// Create seekable reader
+	var seekableInput gzstd.Seekable
+	if inputFile == "-" {
+		data, err := io.ReadAll(input)
+		if err != nil {
+			return err
+		}
+		seekableInput = bytes.NewReader(data)
+	} else {
+		seekableInput = input.(*os.File)
+	}
+
+	// Create decoder
+	decoder, err := gzstd.NewDecoder(seekableInput, nil)
+	if err != nil {
+		return err
+	}
+
+	// Test by reading all data
+	_, err = io.Copy(io.Discard, decoder)
+	if err != nil {
+		return err
+	}
+
+	if opts.Verbose {
+		fmt.Printf("%s:\tOK\n", inputFile)
+	}
+
+	return nil
+}
+
+// Helper functions
+
+func openInput(filename string) (io.ReadCloser, os.FileInfo, error) {
+	if filename == "-" {
+		return os.Stdin, nil, nil
+	}
+	
+	f, err := os.Open(filename)
+	if err != nil {
+		return nil, nil, err
+	}
+	
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	
+	return f, info, nil
+}
+
+func openOutput(filename string, force bool) (io.WriteCloser, error) {
+	if filename == "-" {
+		return os.Stdout, nil
+	}
+	
+	// Check if file exists
+	if !force {
+		if _, err := os.Stat(filename); err == nil {
+			return nil, fmt.Errorf("file exists")
+		}
+	}
+	
+	return os.Create(filename)
+}
+
+func getOutputFileName(inputFile, extension string, toStdout bool) string {
+	if toStdout || inputFile == "-" {
+		return "-"
+	}
+	
+	if extension != "" {
+		// Compressing: add extension
+		return inputFile + extension
+	}
+	
+	// Decompressing: remove extension
+	if strings.HasSuffix(inputFile, fileExtension) {
+		return strings.TrimSuffix(inputFile, fileExtension)
+	}
+	
+	return inputFile + ".out"
+}
+
+func getZstdLevel(level int) zstd.EncoderLevel {
+	// Map 1-9 to zstd levels
+	switch level {
+	case 1:
+		return zstd.SpeedFastest
+	case 2:
+		return zstd.SpeedDefault
+	case 3:
+		return zstd.SpeedDefault
+	case 4:
+		return zstd.SpeedBetterCompression
+	case 5:
+		return zstd.SpeedBetterCompression
+	case 6:
+		return zstd.SpeedBetterCompression
+	case 7:
+		return zstd.SpeedBestCompression
+	case 8:
+		return zstd.SpeedBestCompression
+	case 9:
+		return zstd.SpeedBestCompression
+	default:
+		return zstd.SpeedDefault
+	}
+}
+
+func readSeekTable(f *os.File) (*gzstd.SeekTable, error) {
+	footer, err := gzstd.ReadSeekTableFooter(f)
+	if err != nil {
+		return nil, err
+	}
+
+	seekTableSize, err := gzstd.ParseSeekTableSize(footer)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := f.Seek(-int64(seekTableSize), io.SeekEnd); err != nil {
+		return nil, err
+	}
+
+	seekTableData := make([]byte, seekTableSize)
+	if _, err := io.ReadFull(f, seekTableData); err != nil {
+		return nil, err
+	}
+
+	return gzstd.ParseSeekTable(seekTableData)
 }
 
 func parseByteSize(s string) (int64, error) {
@@ -353,23 +551,4 @@ func parseByteSize(s string) (int64, error) {
 	}
 
 	return int64(num * float64(multiplier)), nil
-}
-
-func formatBytes(bytes uint64) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
-	)
-
-	switch {
-	case bytes >= GB:
-		return fmt.Sprintf("%.2f GB", float64(bytes)/float64(GB))
-	case bytes >= MB:
-		return fmt.Sprintf("%.2f MB", float64(bytes)/float64(MB))
-	case bytes >= KB:
-		return fmt.Sprintf("%.2f KB", float64(bytes)/float64(KB))
-	default:
-		return fmt.Sprintf("%d B", bytes)
-	}
 }
